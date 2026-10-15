@@ -1,0 +1,37 @@
+# bmcgrab collector — local configuration (one file per regional instance).
+# Everything else (interval, workers, metric families, inventory source,
+# quality thresholds) lives in the central config and is edited from the web
+# UI. Any key here can be overridden with BMCGRAB_<SECTION>_<KEY>, e.g.
+# BMCGRAB_REGION=eu-west-1.
+
+region: eu-west-1            # inventory filter + tag on every row
+
+database:
+  dsn: postgres://bmcgrab_writer@tsdb.central.corp:5432/bmcgrab?sslmode=verify-full
+  password_env: BMCGRAB_DB_PASSWORD
+
+cyberark:                    # Central Credential Provider (AIM Web Service)
+  url: https://ccp.corp.local/AIMWebService/api/Accounts
+  app_id: BMCGrab
+  safe: BMC-ReadOnly
+  object: bmc-readonly-svc
+  client_cert: /etc/bmcgrab/tls/client.crt
+  client_key: /etc/bmcgrab/tls/client.key
+  ca_file: /etc/bmcgrab/tls/corp-ca.pem
+  cache_ttl: 1h              # secret kept in memory, refreshed on this TTL
+
+tls:
+  ca_file: /etc/bmcgrab/tls/bmc-ca.pem   # CA that signs the BMC certificates
+
+local:
+  buffer_dir: /var/lib/bmcgrab/buffer     # NDJSON segments when the DB is down
+  config_cache: /var/lib/bmcgrab/config.json
+  max_buffer_mb: 2048
+
+metrics:
+  listen: ":9090"            # /metrics (Prometheus) and /healthz
+
+# Lab only — used when the cyberark section is removed AND --lab is passed.
+# lab_credentials:
+#   username_env: BMCGRAB_BMC_USERNAME
+#   password_env: BMCGRAB_BMC_PASSWORD

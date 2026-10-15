@@ -1,0 +1,60 @@
+{{- range .Values.collectors }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: bmcgrab-collector-{{ .region }}
+  labels: {{ include "bmcgrab.labels" $ | nindent 4 }}
+data:
+  config.yaml: |
+    region: {{ .region }}
+    database:
+      dsn: {{ $.Values.database.dsn | quote }}
+      password_env: BMCGRAB_DB_PASSWORD
+    cyberark:
+      url: {{ $.Values.cyberark.url | quote }}
+      app_id: {{ $.Values.cyberark.app_id | quote }}
+      safe: {{ $.Values.cyberark.safe | quote }}
+      object: {{ $.Values.cyberark.object | quote }}
+      client_cert: /etc/bmcgrab/tls/client.crt
+      client_key: /etc/bmcgrab/tls/client.key
+      ca_file: /etc/bmcgrab/tls/corp-ca.pem
+    tls:
+      ca_file: /etc/bmcgrab/tls/bmc-ca.pem
+    local:
+      buffer_dir: /var/lib/bmcgrab/buffer
+      config_cache: /var/lib/bmcgrab/config.json
+    metrics:
+      listen: ":9090"
+{{- end }}
+{{- if .Values.server.enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: bmcgrab-server
+  labels: {{ include "bmcgrab.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    database:
+      dsn: {{ .Values.server.dsn | quote }}
+      password_env: BMCGRAB_DB_PASSWORD
+    server:
+      listen: ":8080"
+      oidc_issuer: {{ .Values.server.oidc.issuer | quote }}
+      oidc_client_id: {{ .Values.server.oidc.clientId | quote }}
+      oidc_client_secret_env: BMCGRAB_OIDC_SECRET
+      oidc_redirect_url: {{ .Values.server.oidc.redirectUrl | quote }}
+    cyberark:
+      url: {{ .Values.cyberark.url | quote }}
+      app_id: {{ .Values.cyberark.app_id | quote }}
+      safe: {{ .Values.cyberark.safe | quote }}
+      object: {{ .Values.cyberark.object | quote }}
+      client_cert: /etc/bmcgrab/tls/client.crt
+      client_key: /etc/bmcgrab/tls/client.key
+      ca_file: /etc/bmcgrab/tls/corp-ca.pem
+    tls:
+      ca_file: /etc/bmcgrab/tls/bmc-ca.pem
+    metrics:
+      listen: ":9090"
+{{- end }}

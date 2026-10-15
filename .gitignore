@@ -1,0 +1,5 @@
+bin/
+go.local.mod
+go.local.sum
+*.ndjson
+*.corrupt

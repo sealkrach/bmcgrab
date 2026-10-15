@@ -1,0 +1,6 @@
+{{template "head" .}}
+<table class="list wide">
+<thead><tr><th>When</th><th>Who</th><th>Action</th><th>Details</th></tr></thead>
+{{range .Data}}<tr><td class="muted">{{.Time.Format "2006-01-02 15:04:05"}}</td><td>{{.Actor}}</td><td><code>{{.Action}}</code></td><td class="muted small">{{.Details}}</td></tr>{{else}}<tr><td colspan="4" class="muted">No entries.</td></tr>{{end}}
+</table>
+{{template "foot" .}}

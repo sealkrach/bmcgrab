@@ -1,0 +1,10 @@
+# Lab server: no OIDC (open UI), DSN from env.
+database:
+  dsn: postgres://bmcgrab:bmcgrab@tsdb:5432/bmcgrab?sslmode=disable
+server:
+  listen: ":8080"
+lab_credentials:
+  username_env: BMCGRAB_BMC_USERNAME
+  password_env: BMCGRAB_BMC_PASSWORD
+metrics:
+  listen: ":9090"

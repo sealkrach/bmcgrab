@@ -1,0 +1,4 @@
+id,hostname,bmc_ip,region,vendor
+srv-0001,db-prod-01,10.10.1.11,eu-west-1,
+srv-0002,app-prod-07,10.10.1.12,eu-west-1,dell
+srv-0003,stor-03,10.20.1.5,eu-central-1,supermicro

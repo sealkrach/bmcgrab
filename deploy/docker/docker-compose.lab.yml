@@ -1,0 +1,47 @@
+# Lab stack: TimescaleDB + migrate + one collector + the server, with BMC
+# credentials from environment (no CyberArk) and insecure TLS allowed.
+#   BMCGRAB_BMC_USERNAME=svc BMCGRAB_BMC_PASSWORD=... docker compose -f deploy/docker/docker-compose.lab.yml up
+services:
+  tsdb:
+    image: timescale/timescaledb:2.17.2-pg16
+    environment:
+      POSTGRES_DB: bmcgrab
+      POSTGRES_USER: bmcgrab
+      POSTGRES_PASSWORD: bmcgrab
+    ports: ["5432:5432"]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U bmcgrab"], interval: 5s, retries: 20 }
+
+  migrate:
+    build: { context: ../.., dockerfile: deploy/docker/Dockerfile }
+    command: ["migrate", "--config", "/etc/bmcgrab/config.yaml"]
+    environment: { BMCGRAB_DATABASE_DSN: "postgres://bmcgrab:bmcgrab@tsdb:5432/bmcgrab?sslmode=disable" }
+    volumes: ["./lab-collector.yaml:/etc/bmcgrab/config.yaml:ro"]
+    depends_on: { tsdb: { condition: service_healthy } }
+
+  collector:
+    build: { context: ../.., dockerfile: deploy/docker/Dockerfile }
+    command: ["collector", "--config", "/etc/bmcgrab/config.yaml", "--lab"]
+    environment:
+      BMCGRAB_DATABASE_DSN: "postgres://bmcgrab:bmcgrab@tsdb:5432/bmcgrab?sslmode=disable"
+      BMCGRAB_BMC_USERNAME: ${BMCGRAB_BMC_USERNAME:-admin}
+      BMCGRAB_BMC_PASSWORD: ${BMCGRAB_BMC_PASSWORD:-changeme}
+    volumes:
+      - ./lab-collector.yaml:/etc/bmcgrab/config.yaml:ro
+      - ../../configs/inventory.example.csv:/etc/bmcgrab/inventory.csv:ro
+      - buffer:/var/lib/bmcgrab
+    ports: ["9090:9090"]
+    depends_on: { migrate: { condition: service_completed_successfully } }
+
+  server:
+    build: { context: ../.., dockerfile: deploy/docker/Dockerfile }
+    command: ["server", "--config", "/etc/bmcgrab/config.yaml", "--lab"]
+    environment:
+      BMCGRAB_DATABASE_DSN: "postgres://bmcgrab:bmcgrab@tsdb:5432/bmcgrab?sslmode=disable"
+      BMCGRAB_BMC_USERNAME: ${BMCGRAB_BMC_USERNAME:-admin}
+      BMCGRAB_BMC_PASSWORD: ${BMCGRAB_BMC_PASSWORD:-changeme}
+    volumes: ["./lab-server.yaml:/etc/bmcgrab/config.yaml:ro"]
+    ports: ["8080:8080"]
+    depends_on: { migrate: { condition: service_completed_successfully } }
+
+volumes:
+  buffer: {}

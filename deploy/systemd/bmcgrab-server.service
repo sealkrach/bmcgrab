@@ -1,0 +1,21 @@
+[Unit]
+Description=bmcgrab central web UI
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bmcgrab
+Group=bmcgrab
+EnvironmentFile=-/etc/bmcgrab/server.env
+ExecStart=/usr/local/bin/bmcgrab server --config /etc/bmcgrab/server.yaml
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

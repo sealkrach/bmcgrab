@@ -1,0 +1,25 @@
+{{define "head"}}<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>bmcgrab · {{.Title}}</title>
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/htmx.min.js" defer></script>
+</head><body>
+<header class="top">
+  <div class="brand">bmcgrab <span class="muted">{{.Version}}</span></div>
+  <nav>
+    <a href="/" class="{{if eq .Active "dashboard"}}on{{end}}">Dashboard</a>
+    <a href="/servers" class="{{if eq .Active "servers"}}on{{end}}">Servers</a>
+    <a href="/config" class="{{if eq .Active "config"}}on{{end}}">Configuration</a>
+    <a href="/check" class="{{if eq .Active "check"}}on{{end}}">Check</a>
+    <a href="/audit" class="{{if eq .Active "audit"}}on{{end}}">Audit</a>
+  </nav>
+  <div class="user">{{.User}}{{if .Auth}} <form method="post" action="/auth/logout" class="inline"><button class="link">sign out</button></form>{{else}} <span class="warn-badge" title="No OIDC issuer configured">no auth</span>{{end}}</div>
+</header>
+<main>
+{{if .Error}}<div class="alert err">{{.Error}}</div>{{end}}
+{{if .Flash}}<div class="alert ok">{{.Flash}}</div>{{end}}
+{{end}}
+
+{{define "foot"}}</main></body></html>{{end}}
+
+{{define "status"}}<span class="pill {{.}}">{{.}}</span>{{end}}

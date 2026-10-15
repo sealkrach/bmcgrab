@@ -1,0 +1,49 @@
+{{- range .Values.collectors }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: bmcgrab-buffer-{{ .region }}
+  labels: {{ include "bmcgrab.labels" $ | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources: { requests: { storage: {{ $.Values.bufferSize }} } }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bmcgrab-collector-{{ .region }}
+  labels: {{ include "bmcgrab.labels" $ | nindent 4 }}
+spec:
+  replicas: 1
+  strategy: { type: Recreate }   # one collector per region; the PVC is RWO
+  selector:
+    matchLabels: { app.kubernetes.io/name: bmcgrab, app.kubernetes.io/component: collector, bmcgrab/region: {{ .region }} }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: bmcgrab, app.kubernetes.io/component: collector, bmcgrab/region: {{ .region }} }
+      annotations: { prometheus.io/scrape: "true", prometheus.io/port: "9090" }
+    spec:
+      {{- with .nodeSelector }}
+      nodeSelector: {{ toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext: { fsGroup: 65532 }
+      containers:
+        - name: collector
+          image: {{ include "bmcgrab.image" $ }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          args: ["collector", "--config", "/etc/bmcgrab/config.yaml"]
+          envFrom: [{ secretRef: { name: {{ $.Values.existingSecret }} } }]
+          ports: [{ name: metrics, containerPort: 9090 }]
+          livenessProbe: { httpGet: { path: /healthz, port: metrics }, initialDelaySeconds: 30, periodSeconds: 60 }
+          resources: {{ toYaml $.Values.collectorResources | nindent 12 }}
+          securityContext: {{ include "bmcgrab.security" $ | nindent 12 }}
+          volumeMounts:
+            - { name: config, mountPath: /etc/bmcgrab/config.yaml, subPath: config.yaml, readOnly: true }
+            - { name: tls, mountPath: /etc/bmcgrab/tls, readOnly: true }
+            - { name: buffer, mountPath: /var/lib/bmcgrab }
+      volumes:
+        - { name: config, configMap: { name: bmcgrab-collector-{{ .region }} } }
+        - { name: tls, secret: { secretName: {{ $.Values.tlsSecret }} } }
+        - { name: buffer, persistentVolumeClaim: { claimName: bmcgrab-buffer-{{ .region }} } }
+{{- end }}

@@ -1,0 +1,28 @@
+{{template "head" .}}
+{{with .Data}}
+<form class="filters" method="get">
+  <input type="search" name="q" placeholder="hostname or id" value="{{.Q}}">
+  <select name="region"><option value="">all regions</option>{{range .Regions}}<option value="{{.Region}}" {{if eq .Region $.Data.Region}}selected{{end}}>{{.Region}}</option>{{end}}</select>
+  <select name="status"><option value="">any status</option>
+    <option value="ok" {{if eq .Status "ok"}}selected{{end}}>ok</option>
+    <option value="partial" {{if eq .Status "partial"}}selected{{end}}>partial</option>
+    <option value="failed" {{if eq .Status "failed"}}selected{{end}}>failed</option>
+  </select>
+  <button>Filter</button>
+</form>
+<table class="list wide">
+  <thead><tr><th>Server</th><th>Region</th><th>Vendor · model</th><th>Status</th><th>Last seen</th><th>Families</th><th>Error</th></tr></thead>
+  {{range .Rows}}
+  <tr>
+    <td><code>{{.Hostname}}</code><div class="muted small">{{.ID}}</div></td>
+    <td>{{.Region}}</td>
+    <td>{{.Vendor}}<div class="muted small">{{.Model}}</div></td>
+    <td>{{template "status" .Status}}</td>
+    <td class="muted">{{ago .LastSeen}}</td>
+    <td>{{range .Families}}<span class="fam {{.State}}" title="{{.Reason}}">{{.Family}}</span> {{end}}</td>
+    <td class="muted small">{{.Error}}</td>
+  </tr>
+  {{else}}<tr><td colspan="7" class="muted">No servers match.</td></tr>{{end}}
+</table>
+{{end}}
+{{template "foot" .}}

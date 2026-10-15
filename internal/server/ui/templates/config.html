@@ -1,0 +1,53 @@
+{{template "head" .}}
+{{with .Data}}{{$c := .Cfg}}
+<p class="muted">Version {{$c.Version}} · saved {{ago $c.Updated}} by {{$c.Author}}. Changes apply on every collector's next cycle, no restart.</p>
+<form method="post" action="/config" class="cfg">
+  <fieldset><legend>Collection</legend>
+    <label>Interval <input name="collect.interval" value="{{fmtDur $c.Collect.Interval}}" pattern="[0-9]+(ms|s|m|h)"> <small>≥ 30s, e.g. 5m</small></label>
+    <label>Workers per collector <input name="collect.workers" type="number" min="1" max="1000" value="{{$c.Collect.Workers}}"></label>
+    <label>Timeout per BMC <input name="collect.timeout" value="{{fmtDur $c.Collect.Timeout}}"></label>
+    <label>Retries <input name="collect.retries" type="number" min="0" max="5" value="{{$c.Collect.Retries}}"></label>
+  </fieldset>
+  <fieldset><legend>Circuit breaker</legend>
+    <label>Consecutive failures before pause <input name="breaker.failures" type="number" min="1" value="{{$c.Breaker.Failures}}"></label>
+    <label>Pause duration <input name="breaker.cooldown" value="{{fmtDur $c.Breaker.Cooldown}}"></label>
+  </fieldset>
+  <fieldset><legend>Metric families</legend>
+    {{range $f := (list "cpu" "memory" "thermal" "power")}}
+    <label class="check"><input type="checkbox" name="metrics.enabled" value="{{$f}}" {{if $c.MetricEnabled $f}}checked{{end}}> {{$f}}</label>
+    {{end}}
+  </fieldset>
+  <fieldset><legend>Data quality</legend>
+    <label>Temperature °C min <input name="quality.temp_min_c" type="number" step="any" value="{{$c.Quality.TempMinC}}"></label>
+    <label>max <input name="quality.temp_max_c" type="number" step="any" value="{{$c.Quality.TempMaxC}}"></label>
+    <label>Power W min <input name="quality.power_min_w" type="number" step="any" value="{{$c.Quality.PowerMinW}}"></label>
+    <label>max <input name="quality.power_max_w" type="number" step="any" value="{{$c.Quality.PowerMaxW}}"></label>
+    <label>Max BMC clock skew <input name="quality.max_clock_skew" value="{{fmtDur $c.Quality.MaxClockSkew}}"></label>
+  </fieldset>
+  <fieldset><legend>Inventory (external, read-only)</legend>
+    <label>Type <select name="inventory.type">
+      <option value="sql" {{if eq $c.Inventory.Type "sql"}}selected{{end}}>SQL</option>
+      <option value="rest" {{if eq $c.Inventory.Type "rest"}}selected{{end}}>REST</option>
+      <option value="csv" {{if eq $c.Inventory.Type "csv"}}selected{{end}}>CSV</option></select></label>
+    <label>Refresh <input name="inventory.refresh" value="{{fmtDur $c.Inventory.Refresh}}"></label>
+    <label>SQL DSN <input name="inventory.sql.dsn" value="{{$c.Inventory.SQL.DSN}}" placeholder="postgres://ro@cmdb:5432/cmdb?sslmode=verify-full"></label>
+    <label>SQL password env var <input name="inventory.sql.password_env" value="{{$c.Inventory.SQL.PasswordEnv}}"></label>
+    <label>SQL query <textarea name="inventory.sql.query" rows="2">{{$c.Inventory.SQL.Query}}</textarea> <small>columns: id, hostname, bmc_ip, region, vendor</small></label>
+    <label>REST URL <input name="inventory.rest.url" value="{{$c.Inventory.REST.URL}}"></label>
+    <label>REST JSON path <input name="inventory.rest.json_path" value="{{$c.Inventory.REST.JSONPath}}" placeholder="data.servers"></label>
+    <label>REST token env var <input name="inventory.rest.token_env" value="{{$c.Inventory.REST.TokenEnv}}"></label>
+    <label>CSV path <input name="inventory.csv.path" value="{{$c.Inventory.CSV.Path}}"></label>
+  </fieldset>
+  <fieldset><legend>TLS</legend>
+    <label class="check"><input type="checkbox" name="tls.insecure_skip_verify" {{if $c.TLS.InsecureSkipVerify}}checked{{end}}> Skip BMC certificate verification <small>(only honoured by collectors started with --lab)</small></label>
+  </fieldset>
+  <button class="primary">Save as new version</button>
+</form>
+
+<h2>History</h2>
+<table class="list">
+{{range .History}}<tr><td>v{{.Version}}</td><td class="muted">{{ago .Updated}} · {{.Author}}</td><td class="muted">{{fmtDur .Collect.Interval}} · {{.Collect.Workers}} workers · {{.Inventory.Type}}</td>
+<td>{{if ne .Version $c.Version}}<form method="post" action="/config/rollback/{{.Version}}" class="inline"><button class="link">re-apply</button></form>{{else}}<span class="muted">current</span>{{end}}</td></tr>{{end}}
+</table>
+{{end}}
+{{template "foot" .}}

@@ -1,0 +1,35 @@
+{{define "overview"}}{{with .Data}}
+<section class="cards">
+  <div class="card"><div class="label">Collected</div><div class="big ok">{{.Totals.OK}}</div></div>
+  <div class="card"><div class="label">Partial</div><div class="big partial">{{.Totals.Partial}}</div></div>
+  <div class="card"><div class="label">Failed</div><div class="big failed">{{.Totals.Failed}}</div></div>
+  <div class="card"><div class="label">Total servers</div><div class="big">{{.Totals.Total}}</div></div>
+</section>
+
+<h2>Regions <span class="muted">· last cycle · interval {{dur .Interval}}</span></h2>
+{{if not .Regions}}<p class="muted">No collector heartbeat yet. Start a collector or run <code>bmcgrab check</code>.</p>{{end}}
+<table class="list">
+{{range .Regions}}
+  <tr>
+    <td>{{if .Stale}}<span class="dot failed" title="no heartbeat"></span>{{else if gt .Failed 0}}<span class="dot partial"></span>{{else}}<span class="dot ok"></span>{{end}} <strong>{{.Region}}</strong> <span class="muted">{{.Instance}}</span></td>
+    <td class="muted">{{.Servers}} srv · {{ago .LastCycle}} · {{dur .Duration}}</td>
+    <td class="muted">ok {{.OK}} · partial {{.Partial}} · failed {{.Failed}}{{if gt .BreakerOpen 0}} · <span class="partial">{{.BreakerOpen}} paused</span>{{end}}{{if gt .Buffered 0}} · <span class="partial">{{.Buffered}} B buffered</span>{{end}}{{if .InventoryErr}} · <span class="failed" title="{{.InventoryErr}}">inventory stale</span>{{end}}</td>
+  </tr>
+{{end}}
+</table>
+
+{{if .Unsupported}}
+<h2>Not exposed by firmware <span class="muted">· not a bug: the BMC does not publish it</span></h2>
+<table class="list">
+{{range $vendor, $fams := .Unsupported}}<tr><td><strong>{{$vendor}}</strong></td><td class="muted">{{range $f, $n := $fams}}{{$f}}: {{$n}} servers &nbsp; {{end}}</td></tr>{{end}}
+</table>
+{{end}}
+
+<h2>Failed servers <a class="muted small" href="/servers?status=failed">see all</a></h2>
+{{if not .Failed}}<p class="muted">None.</p>{{end}}
+<table class="list">
+{{range .Failed}}
+  <tr><td><code>{{.Hostname}}</code></td><td class="muted">{{.Vendor}} · {{ago .LastSeen}}</td><td class="muted">{{.Error}}</td></tr>
+{{end}}
+</table>
+{{end}}{{end}}

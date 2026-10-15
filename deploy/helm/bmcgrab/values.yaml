@@ -1,0 +1,51 @@
+image:
+  repository: registry.corp.local/infra/bmcgrab
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+
+# Secret holding BMCGRAB_DB_PASSWORD (and BMCGRAB_OIDC_SECRET for the server).
+existingSecret: bmcgrab-secrets
+# Secret with client.crt / client.key / corp-ca.pem / bmc-ca.pem mounted at /etc/bmcgrab/tls
+tlsSecret: bmcgrab-tls
+
+database:
+  dsn: postgres://bmcgrab_writer@tsdb.central.corp:5432/bmcgrab?sslmode=verify-full
+
+cyberark:
+  url: https://ccp.corp.local/AIMWebService/api/Accounts
+  app_id: BMCGrab
+  safe: BMC-ReadOnly
+  object: bmc-readonly-svc
+
+# One Deployment per region. Use nodeSelector/affinity to pin each to its site.
+collectors:
+  - region: eu-west-1
+    nodeSelector: { topology.kubernetes.io/region: eu-west-1 }
+  - region: eu-central-1
+    nodeSelector: { topology.kubernetes.io/region: eu-central-1 }
+  - region: us-east-1
+    nodeSelector: { topology.kubernetes.io/region: us-east-1 }
+  - region: ap-south-1
+    nodeSelector: { topology.kubernetes.io/region: ap-south-1 }
+
+collectorResources:
+  requests: { cpu: 250m, memory: 256Mi }
+  limits: { cpu: "2", memory: 1Gi }
+bufferSize: 4Gi   # PVC per collector for the local buffer
+
+server:
+  enabled: true
+  replicas: 1
+  dsn: postgres://bmcgrab_server@tsdb.central.corp:5432/bmcgrab?sslmode=verify-full
+  oidc:
+    issuer: https://sso.corp.local/realms/infra
+    clientId: bmcgrab
+    redirectUrl: https://bmcgrab.corp.local/auth/callback
+  ingress:
+    enabled: true
+    className: nginx
+    host: bmcgrab.corp.local
+    tlsSecret: bmcgrab-ingress-tls
+
+serviceMonitor:
+  enabled: false

@@ -1,0 +1,12 @@
+# Lab collector: no CyberArk, credentials from env (--lab), DSN from env.
+region: lab
+database:
+  dsn: postgres://bmcgrab:bmcgrab@tsdb:5432/bmcgrab?sslmode=disable
+lab_credentials:
+  username_env: BMCGRAB_BMC_USERNAME
+  password_env: BMCGRAB_BMC_PASSWORD
+local:
+  buffer_dir: /var/lib/bmcgrab/buffer
+  config_cache: /var/lib/bmcgrab/config.json
+metrics:
+  listen: ":9090"

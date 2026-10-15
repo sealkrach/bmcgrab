@@ -1,0 +1,25 @@
+[Unit]
+Description=bmcgrab regional Redfish collector
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bmcgrab
+Group=bmcgrab
+EnvironmentFile=-/etc/bmcgrab/collector.env
+ExecStart=/usr/local/bin/bmcgrab collector --config /etc/bmcgrab/collector.yaml
+Restart=always
+RestartSec=10
+StateDirectory=bmcgrab
+StateDirectoryMode=0750
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/bmcgrab
+CapabilityBoundingSet=
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

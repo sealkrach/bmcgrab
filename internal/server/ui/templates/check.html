@@ -1,0 +1,5 @@
+{{template "head" .}}
+<p class="muted">Runs the same pre-flight as <code>bmcgrab check</code> from this server: database, central config, credential, inventory and a sample of BMCs.</p>
+<button class="primary" hx-post="/check/run" hx-target="#result" hx-indicator="#spin">Run check</button> <span id="spin" class="htmx-indicator muted">running…</span>
+<div id="result"></div>
+{{template "foot" .}}

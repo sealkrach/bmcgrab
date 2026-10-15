@@ -1,0 +1,5 @@
+{{template "head" .}}
+<div hx-get="/partials/overview" hx-trigger="every 30s" hx-swap="innerHTML">
+{{template "overview" .}}
+</div>
+{{template "foot" .}}

@@ -1,0 +1,6 @@
+{{with .Data}}
+<table class="list">
+{{range .Items}}<tr><td>{{if .OK}}<span class="dot ok"></span>{{else}}<span class="dot failed"></span>{{end}} {{.Name}}</td><td class="muted">{{.Detail}}</td></tr>{{end}}
+</table>
+{{if eq .Failed 0}}<div class="alert ok">All checks passed. BMC legend: ✓ collected · – not exposed by firmware · ✗ error</div>{{else}}<div class="alert err">{{.Failed}} check(s) failed.</div>{{end}}
+{{end}}

@@ -1,0 +1,28 @@
+# bmcgrab server — central web UI and read API (one instance).
+
+database:
+  dsn: postgres://bmcgrab_server@tsdb.central.corp:5432/bmcgrab?sslmode=verify-full
+  password_env: BMCGRAB_DB_PASSWORD
+
+server:
+  listen: ":8080"
+  oidc_issuer: https://sso.corp.local/realms/infra   # leave empty ONLY in a lab
+  oidc_client_id: bmcgrab
+  oidc_client_secret_env: BMCGRAB_OIDC_SECRET
+  oidc_redirect_url: https://bmcgrab.corp.local/auth/callback
+
+metrics:
+  listen: ":9090"
+
+# Optional: lets the "Check" page probe BMCs from the central server too.
+cyberark:
+  url: https://ccp.corp.local/AIMWebService/api/Accounts
+  app_id: BMCGrab
+  safe: BMC-ReadOnly
+  object: bmc-readonly-svc
+  client_cert: /etc/bmcgrab/tls/client.crt
+  client_key: /etc/bmcgrab/tls/client.key
+  ca_file: /etc/bmcgrab/tls/corp-ca.pem
+
+tls:
+  ca_file: /etc/bmcgrab/tls/bmc-ca.pem

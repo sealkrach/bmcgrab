@@ -1,0 +1,76 @@
+{{- if .Values.server.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bmcgrab-server
+  labels: {{ include "bmcgrab.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.server.replicas }}
+  selector:
+    matchLabels: { app.kubernetes.io/name: bmcgrab, app.kubernetes.io/component: server }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: bmcgrab, app.kubernetes.io/component: server }
+      annotations: { prometheus.io/scrape: "true", prometheus.io/port: "9090" }
+    spec:
+      securityContext: { fsGroup: 65532 }
+      initContainers:
+        - name: migrate
+          image: {{ include "bmcgrab.image" . }}
+          args: ["migrate", "--config", "/etc/bmcgrab/config.yaml"]
+          envFrom: [{ secretRef: { name: {{ .Values.existingSecret }} } }]
+          securityContext: {{ include "bmcgrab.security" . | nindent 12 }}
+          volumeMounts:
+            - { name: config, mountPath: /etc/bmcgrab/config.yaml, subPath: config.yaml, readOnly: true }
+      containers:
+        - name: server
+          image: {{ include "bmcgrab.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["server", "--config", "/etc/bmcgrab/config.yaml"]
+          envFrom: [{ secretRef: { name: {{ .Values.existingSecret }} } }]
+          ports:
+            - { name: http, containerPort: 8080 }
+            - { name: metrics, containerPort: 9090 }
+          livenessProbe: { httpGet: { path: /healthz, port: http }, periodSeconds: 30 }
+          readinessProbe: { httpGet: { path: /healthz, port: http }, periodSeconds: 10 }
+          resources: { requests: { cpu: 100m, memory: 128Mi }, limits: { cpu: "1", memory: 512Mi } }
+          securityContext: {{ include "bmcgrab.security" . | nindent 12 }}
+          volumeMounts:
+            - { name: config, mountPath: /etc/bmcgrab/config.yaml, subPath: config.yaml, readOnly: true }
+            - { name: tls, mountPath: /etc/bmcgrab/tls, readOnly: true }
+      volumes:
+        - { name: config, configMap: { name: bmcgrab-server } }
+        - { name: tls, secret: { secretName: {{ .Values.tlsSecret }} } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bmcgrab-server
+  labels: {{ include "bmcgrab.labels" . | nindent 4 }}
+spec:
+  selector: { app.kubernetes.io/name: bmcgrab, app.kubernetes.io/component: server }
+  ports:
+    - { name: http, port: 80, targetPort: http }
+    - { name: metrics, port: 9090, targetPort: metrics }
+{{- if .Values.server.ingress.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: bmcgrab-server
+  labels: {{ include "bmcgrab.labels" . | nindent 4 }}
+spec:
+  ingressClassName: {{ .Values.server.ingress.className }}
+  tls:
+    - hosts: [{{ .Values.server.ingress.host | quote }}]
+      secretName: {{ .Values.server.ingress.tlsSecret }}
+  rules:
+    - host: {{ .Values.server.ingress.host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: bmcgrab-server, port: { name: http } } }
+{{- end }}
+{{- end }}
