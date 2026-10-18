@@ -11,6 +11,10 @@ type Server struct {
 	BMCAddr  string `json:"bmc_ip"` // IP or DNS name of the BMC
 	Region   string `json:"region"`
 	Vendor   string `json:"vendor,omitempty"` // optional hint; detected otherwise
+	// SecretRef points at this BMC's own CyberArk account ("safe/object" or
+	// "object"). Empty means the shared default account. It is a pointer to a
+	// secret, never the secret itself.
+	SecretRef string `json:"secret_ref,omitempty"`
 }
 
 // Family groups metrics by what the operator enables in central config.

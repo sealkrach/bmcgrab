@@ -13,12 +13,22 @@ database:
 cyberark:                    # Central Credential Provider (AIM Web Service)
   url: https://ccp.corp.local/AIMWebService/api/Accounts
   app_id: BMCGrab
-  safe: BMC-ReadOnly
+  safe: BMC-ReadOnly           # shared account (modes shared/auto) and default Safe for object-only refs
   object: bmc-readonly-svc
+  # mode: shared    -> one account for every BMC (secret_ref in the inventory is ignored)
+  #       per_asset -> every server must carry its own secret_ref ("safe/object" or "object")
+  #       auto      -> secret_ref when present, else the shared account (default)
+  mode: auto
   client_cert: /etc/bmcgrab/tls/client.crt
   client_key: /etc/bmcgrab/tls/client.key
   ca_file: /etc/bmcgrab/tls/corp-ca.pem
-  cache_ttl: 1h              # secret kept in memory, refreshed on this TTL
+  cache_ttl: 1h              # secret kept in memory, refreshed on this TTL (±10 % jitter)
+  stale_max: 6h              # serve an expired secret this long if the CCP is down (0 = default)
+  refresh_ahead: 0.8         # background sync refetches accounts older than 80 % of cache_ttl
+  sync_interval: 10m         # background sync period (0 disables); also pre-warms at start
+  max_concurrent: 8          # parallel requests to the CCP
+  auth_retry: 30m            # a BMC that rejected a password is not retried with the same one before this
+  secret_store: protected    # protected = locked + encrypted memory (memguard); plain = fallback
 
 tls:
   ca_file: /etc/bmcgrab/tls/bmc-ca.pem   # CA that signs the BMC certificates

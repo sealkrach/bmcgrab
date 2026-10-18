@@ -16,6 +16,10 @@ cyberark:
   app_id: BMCGrab
   safe: BMC-ReadOnly
   object: bmc-readonly-svc
+  mode: auto            # shared | per_asset | auto (see configs/collector.example.yaml)
+  cache_ttl: 1h
+  sync_interval: 10m
+  secret_store: protected
 
 # One Deployment per region. Use nodeSelector/affinity to pin each to its site.
 collectors:

@@ -73,7 +73,40 @@ bmcgrab collector --config FILE          run the regional collector
 bmcgrab server    --config FILE          run the central web UI / API
 bmcgrab migrate   --config FILE          apply migrations, seed default config
 bmcgrab check     --config FILE [--sample N] [--lab]
+bmcgrab secrets sync   [--region R] [--server ID]   refetch BMC secrets from CyberArk now
+bmcgrab secrets status                              latest synchronisations per region
 ```
+
+## BMC credentials (CyberArk)
+
+Two layouts, chosen with `cyberark.mode`:
+
+* **shared** — one account for every BMC (`cyberark.safe` / `cyberark.object`).
+* **per_asset** — each server has its own account: add a `secret_ref` column to the
+  inventory (`safe/object`, or just `object` to reuse `cyberark.safe`). SQL inventory
+  queries may return it as a sixth column. **auto** mixes both: `secret_ref` when set,
+  otherwise the shared account.
+
+Secrets are cached per account, in memory only (never on disk, never logged):
+
+* One CCP request per account however many BMCs share it (single-flight), bounded by
+  `max_concurrent`, TTL with jitter, and a short backoff after a CCP failure.
+* An expired secret is served for up to `stale_max` if the CCP is down (metric
+  `bmcgrab_vault_stale_served_total`), never one a BMC has rejected.
+* **Rotation.** When a BMC answers 401 the account is re-read and the collection retried
+  once, but only if the password actually changed. If the vault still returns the same
+  password the BMC is left alone (`credential_failed`) until the secret changes or
+  `auth_retry` elapses, so a rotation lag cannot lock BMC accounts.
+* **Synchronisation** runs outside the collection cycle: at start (pre-warm), every
+  `sync_interval`, and on demand from the UI (**Secrets** page) or
+  `bmcgrab secrets sync`. Manual requests are queued in the database
+  (`secret_sync_request`) and executed by the collectors of the targeted region within
+  ~10 s; results are in `secret_sync_run`. A forced sync refetches every account.
+* `secret_store: protected` keeps passwords in memguard enclaves: encrypted in RAM with
+  the key in locked memory, excluded from core dumps and never swapped. It needs a small
+  `RLIMIT_MEMLOCK` (systemd `LimitMEMLOCK=16M`); if unavailable the collector logs a
+  warning and falls back to plain memory. This is not a hardware enclave (SGX/SEV/TDX):
+  confidential-computing nodes would be the next step.
 
 Every local YAML key can be overridden with `BMCGRAB_<SECTION>_<KEY>` environment variables.
 `--lab` unlocks two things that must never be used in production: BMC credentials from
@@ -87,6 +120,7 @@ environment variables and `insecure_skip_verify` for BMC certificates.
 * `server_state` — latest status per server (what the UI lists).
 * `collector_heartbeat` — one row per collector per cycle.
 * `config` — versioned central configuration; `audit_log` — who changed what in the UI.
+* `secret_sync_request` / `secret_sync_run` — manual secret synchronisations and their per-region outcome (no secret values).
 * `metrics_1h` — continuous aggregate (avg/min/max per hour).
 
 ## Vendor notes (read before blaming the collector)
@@ -105,7 +139,7 @@ environment variables and `insecure_skip_verify` for BMC certificates.
 ```
 cmd/bmcgrab            entrypoint: collector | server | check | migrate
 internal/config        local YAML + central (DB) config
-internal/vault         CyberArk CCP client (+ env provider for labs)
+internal/vault         CyberArk CCP client, per-account secret cache, protected memory (+ env provider for labs)
 internal/inventory     SQL / REST / CSV providers with cache
 internal/redfish       raw Redfish client, adapter interface, standard helpers
 internal/redfish/vendors  dell, hpe, lenovo, supermicro, bull, generic
@@ -117,6 +151,7 @@ internal/telemetry     Prometheus + slog
 migrations/            SQL schema
 deploy/                Dockerfile, docker-compose lab, Helm chart, systemd
 test/redfishmock       fake BMC per vendor used by the tests
+test/fakeccp           fake CyberArk CCP (mTLS) for tests and labs: go run ./test/fakeccp/cmd/fakeccp -dir /tmp/ccp -account BMC/a1:root:pw
 ```
 
 ## Development
@@ -128,8 +163,7 @@ make test       # go test -race ./...
 
 Tests run a full collection cycle against five in-process fake BMCs (one per vendor
 profile) without any database, and cover the quality validator and the buffer replay.
-
-> **First build note.** `go.sum` was generated in a sandbox that could not reach
-> `golang.org/x/*`, `gopkg.in` and `google.golang.org`, so their checksum lines are
-> missing. Run `go mod tidy` once after cloning (it only adds those lines) before
-> `make build`. CI runs it as its first step.
+The secret cache and rotation logic are tested against an in-memory vault and against
+`test/fakeccp`, a fake CyberArk CCP with mutual TLS (`internal/vault/ccp_integration_test.go`,
+`internal/collector/secrets_test.go`). The SQL side of the manual sync (`migrations/0002`)
+has no automated test yet: run `bmcgrab migrate` then `bmcgrab secrets sync` on a real database.

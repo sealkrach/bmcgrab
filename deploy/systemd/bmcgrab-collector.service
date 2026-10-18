@@ -20,6 +20,9 @@ PrivateTmp=true
 ReadWritePaths=/var/lib/bmcgrab
 CapabilityBoundingSet=
 LimitNOFILE=65536
+# Protected secret memory (cyberark.secret_store: protected) locks a few pages.
+LimitMEMLOCK=16M
+LimitCORE=0
 
 [Install]
 WantedBy=multi-user.target

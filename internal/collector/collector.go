@@ -38,6 +38,12 @@ type Options struct {
 	Log      *slog.Logger
 	Version  string
 	Lab      bool
+
+	// AuthRetry: a BMC that rejected a password is not contacted again with the
+	// same password for this long (protects against BMC account lockout).
+	AuthRetry time.Duration
+	// SyncInterval: period of the background secret synchronisation; 0 disables.
+	SyncInterval time.Duration
 }
 
 // Collector is one regional instance.
@@ -52,8 +58,24 @@ type Collector struct {
 	client   *redfish.Client
 	clientTS bool     // insecure flag the client was built with
 	breakers sync.Map // bmc addr → *gobreaker.CircuitBreaker[struct{}]
+	authFail sync.Map // server id → authFailure
 	lastErr  error
+
+	lastPollErr string // only touched by syncLoop
 }
+
+// authFailure remembers which secret version a BMC rejected, and when.
+type authFailure struct {
+	version uint64
+	at      time.Time
+}
+
+// Error prefixes on Result.Err for credential problems; the UI and queries can
+// tell them apart from BMC transport failures.
+const (
+	ErrCredentialPending = "credential_pending" // the vault could not provide a secret yet
+	ErrCredentialFailed  = "credential_failed"  // the BMC rejected the secret; waiting for rotation
+)
 
 // New returns a collector ready to Run.
 func New(o Options) *Collector {
@@ -70,9 +92,13 @@ func (c *Collector) Healthy() error {
 
 // Run loops until ctx is cancelled.
 func (c *Collector) Run(ctx context.Context) error {
+	go c.syncLoop(ctx)
 	for {
 		start := time.Now()
 		cfg := c.loadConfig(ctx)
+		c.mu.Lock()
+		c.central = cfg
+		c.mu.Unlock()
 		err := c.cycle(ctx, cfg)
 		c.mu.Lock()
 		c.lastErr = err
@@ -178,12 +204,6 @@ func (c *Collector) cycle(ctx context.Context, cfg *config.Central) error {
 	}
 	c.o.Metrics.InventorySize.Set(float64(len(servers)))
 
-	cred, err := c.o.Vault.Get(ctx)
-	if err != nil {
-		c.o.Metrics.VaultErrors.Inc()
-		return fmt.Errorf("credential: %w", err)
-	}
-
 	families := enabledFamilies(cfg)
 	validator := quality.FromConfig(cfg)
 
@@ -202,7 +222,7 @@ func (c *Collector) cycle(ctx context.Context, cfg *config.Central) error {
 		go func() {
 			defer wg.Done()
 			for sv := range jobs {
-				r := c.collectOne(ctx, cfg, cred, sv, families, cycleID)
+				r := c.collectOne(ctx, cfg, sv, families, cycleID)
 				rej := validator.Apply(r, r.Collected)
 				for _, x := range rej {
 					c.o.Metrics.Rejected.WithLabelValues(x.Sample.Name).Inc()
@@ -310,14 +330,35 @@ func (c *Collector) write(ctx context.Context, cycleID string, results []*model.
 	return nil
 }
 
-// collectOne handles one server: breaker → open session → adapter → retries.
-func (c *Collector) collectOne(ctx context.Context, cfg *config.Central, cred vault.Credential, sv model.Server, families []model.Family, cycleID string) *model.Result {
+// collectOne handles one server: credential → breaker → open session → adapter → retries.
+func (c *Collector) collectOne(ctx context.Context, cfg *config.Central, sv model.Server, families []model.Family, cycleID string) *model.Result {
 	start := time.Now()
 	res := &model.Result{Server: sv, CycleID: cycleID, Collected: start.UTC()}
 	defer func() {
 		res.Duration = time.Since(start)
 		c.o.Metrics.ServerDuration.Observe(res.Duration.Seconds())
+		if res.Err != "" && res.Vendor == "" {
+			res.Vendor = strings.ToLower(sv.Vendor)
+			if res.Vendor == "" {
+				res.Vendor = "unknown"
+			}
+		}
 	}()
+
+	ref, err := c.o.Vault.Resolve(sv.SecretRef)
+	if err != nil {
+		res.Err = ErrCredentialFailed + ": " + err.Error()
+		return res
+	}
+	cred, err := c.o.Vault.Get(ctx, ref)
+	if err != nil {
+		res.Err = ErrCredentialPending + ": " + err.Error()
+		return res
+	}
+	if c.authBlocked(sv.ID, cred.Version) {
+		res.Err = ErrCredentialFailed + ": BMC rejected this secret, waiting for rotation or retry window"
+		return res
+	}
 
 	addr := sv.BMCAddr
 	if !strings.HasPrefix(addr, "http") {
@@ -326,7 +367,13 @@ func (c *Collector) collectOne(ctx context.Context, cfg *config.Central, cred va
 	target := redfish.Target{BaseURL: addr, Username: cred.Username, Password: cred.Password}
 	br := c.breaker(sv.BMCAddr, cfg)
 
-	_, err := br.Execute(func() (struct{}, error) {
+	accept := func(r *model.Result) {
+		res.Vendor, res.Model, res.CPUModel = r.Vendor, r.Model, r.CPUModel
+		res.Samples, res.Families = r.Samples, r.Families
+		c.authFail.Delete(sv.ID)
+	}
+
+	_, err = br.Execute(func() (struct{}, error) {
 		var last error
 		for attempt := 0; attempt <= cfg.Collect.Retries; attempt++ {
 			if attempt > 0 {
@@ -340,28 +387,68 @@ func (c *Collector) collectOne(ctx context.Context, cfg *config.Central, cred va
 			r, err := c.collectSession(cctx, target, sv, families)
 			cancel()
 			if err == nil {
-				res.Vendor, res.Model, res.CPUModel = r.Vendor, r.Model, r.CPUModel
-				res.Samples, res.Families = r.Samples, r.Families
+				accept(r)
+				return struct{}{}, nil
+			}
+			last = err
+			if !errors.Is(err, redfish.ErrUnauthorized) {
+				continue
+			}
+			// Rejected password: the secret may have been rotated. Ask the vault
+			// for a fresh one and retry once, but only with a genuinely different
+			// secret; resending the same one just burns the BMC's lockout counter.
+			c.o.Metrics.VaultAuthFail.Inc()
+			c.o.Vault.Invalidate(ref, cred.Version)
+			fresh, gerr := c.o.Vault.Get(ctx, ref)
+			if gerr != nil || fresh.Version == cred.Version {
+				c.noteAuthFail(sv.ID, cred.Version)
+				break
+			}
+			c.o.Metrics.VaultRotations.Inc()
+			cred = fresh
+			target.Username, target.Password = fresh.Username, fresh.Password
+			cctx, cancel = context.WithTimeout(ctx, cfg.Collect.Timeout)
+			r, err = c.collectSession(cctx, target, sv, families)
+			cancel()
+			if err == nil {
+				accept(r)
 				return struct{}{}, nil
 			}
 			last = err
 			if errors.Is(err, redfish.ErrUnauthorized) {
-				c.o.Vault.Invalidate() // next cycle refetches; don't hammer the BMC
-				break
+				c.o.Metrics.VaultAuthFail.Inc()
+				c.noteAuthFail(sv.ID, fresh.Version)
 			}
+			break
 		}
 		return struct{}{}, last
 	})
 	if err != nil {
 		res.Err = err.Error()
-		if res.Vendor == "" {
-			res.Vendor = strings.ToLower(sv.Vendor)
-			if res.Vendor == "" {
-				res.Vendor = "unknown"
-			}
-		}
 	}
 	return res
+}
+
+func (c *Collector) authRetryWindow() time.Duration {
+	if c.o.AuthRetry > 0 {
+		return c.o.AuthRetry
+	}
+	return 30 * time.Minute
+}
+
+func (c *Collector) noteAuthFail(id string, version uint64) {
+	c.authFail.Store(id, authFailure{version: version, at: time.Now()})
+}
+
+// authBlocked reports whether the BMC already rejected exactly this secret
+// version less than the retry window ago.
+func (c *Collector) authBlocked(id string, version uint64) bool {
+	v, ok := c.authFail.Load(id)
+	if !ok {
+		return false
+	}
+	f := v.(authFailure)
+	return f.version == version && time.Since(f.at) < c.authRetryWindow()
 }
 
 func (c *Collector) collectSession(ctx context.Context, t redfish.Target, sv model.Server, families []model.Family) (*model.Result, error) {

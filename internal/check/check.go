@@ -75,14 +75,6 @@ func Run(ctx context.Context, o Options) *Report {
 		}
 	}
 
-	// 2. credential
-	cred, err := o.Vault.Get(ctx)
-	if err != nil {
-		rep.add("credential ("+o.Vault.Name()+")", false, err.Error())
-	} else {
-		rep.add("credential ("+o.Vault.Name()+")", true, "user "+cred.Username)
-	}
-
 	// 3. inventory
 	var servers []model.Server
 	if p, err := inventory.New(cfg); err != nil {
@@ -93,8 +85,9 @@ func Run(ctx context.Context, o Options) *Report {
 		rep.add("inventory ("+p.Name()+")", len(servers) > 0, fmt.Sprintf("%d servers in region %q", len(servers), o.Local.Region))
 	}
 
+	// 2. credentials: one lookup per distinct account among the sampled servers.
 	// 4. BMCs
-	if cred.Password == "" || len(servers) == 0 {
+	if len(servers) == 0 {
 		return rep
 	}
 	insecure := cfg.TLS.InsecureSkipVerify && o.Lab
@@ -111,7 +104,35 @@ func Run(ctx context.Context, o Options) *Report {
 		n = o.Sample
 	}
 	families := []model.Family{model.FamilyCPU, model.FamilyMemory, model.FamilyThermal, model.FamilyPower}
+	creds := map[string]vault.Credential{}
+	credOK, credFail := 0, 0
 	for _, sv := range servers[:n] {
+		ref, err := o.Vault.Resolve(sv.SecretRef)
+		if err == nil {
+			var c vault.Credential
+			if c, err = o.Vault.Get(ctx, ref); err == nil {
+				if _, seen := creds[ref.String()]; !seen {
+					credOK++
+				}
+				creds[ref.String()] = c
+			}
+		}
+		if err != nil {
+			credFail++
+			rep.add("credential "+sv.Hostname, false, err.Error())
+		}
+	}
+	rep.add("credentials ("+o.Vault.Name()+")", credFail == 0 && credOK > 0,
+		fmt.Sprintf("%d distinct account(s) retrieved, %d server(s) without credential", credOK, credFail))
+	for _, sv := range servers[:n] {
+		ref, err := o.Vault.Resolve(sv.SecretRef)
+		if err != nil {
+			continue
+		}
+		cred, ok := creds[ref.String()]
+		if !ok {
+			continue
+		}
 		addr := sv.BMCAddr
 		if !strings.HasPrefix(addr, "http") {
 			addr = "https://" + addr

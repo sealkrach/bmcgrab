@@ -33,6 +33,12 @@ type Metrics struct {
 	InventorySize   prometheus.Gauge
 	InventoryErrors prometheus.Counter
 	VaultErrors     prometheus.Counter
+	VaultFetch      *prometheus.CounterVec // result: ok|error
+	VaultStale      prometheus.Counter
+	VaultEntries    prometheus.Gauge
+	VaultRotations  prometheus.Counter
+	VaultAuthFail   prometheus.Counter
+	VaultSyncDur    prometheus.Histogram
 	ConfigVersion   prometheus.Gauge
 	LastCycle       prometheus.Gauge
 }
@@ -54,6 +60,12 @@ func NewMetrics(region string) *Metrics {
 		InventorySize:   f.gauge("inventory_servers", "Servers returned by the inventory."),
 		InventoryErrors: f.counter("inventory_errors_total", "Failed inventory refreshes."),
 		VaultErrors:     f.counter("vault_errors_total", "Failed credential retrievals."),
+		VaultFetch:      f.counterVec("vault_fetch_total", "Requests to the vault, by result.", "result"),
+		VaultStale:      f.counter("vault_stale_served_total", "Secrets served stale because the vault failed."),
+		VaultEntries:    f.gauge("vault_cache_entries", "Accounts held in the secret cache."),
+		VaultRotations:  f.counter("vault_rotations_detected_total", "Accounts whose password changed between two fetches."),
+		VaultAuthFail:   f.counter("vault_auth_failures_total", "BMC logins rejected with a credential from the vault."),
+		VaultSyncDur:    f.hist("vault_sync_duration_seconds", "Duration of one secret synchronisation.", []float64{.5, 1, 5, 15, 30, 60, 300}),
 		ConfigVersion:   f.gauge("config_version", "Central config version in use."),
 		LastCycle:       f.gauge("last_cycle_timestamp_seconds", "Unix time of the last completed cycle."),
 	}

@@ -32,6 +32,16 @@ type Local struct {
 		ClientKey  string        `mapstructure:"client_key"`
 		CAFile     string        `mapstructure:"ca_file"`
 		CacheTTL   time.Duration `mapstructure:"cache_ttl"`
+
+		// Mode: shared (one account for every BMC), per_asset (each server
+		// needs a secret_ref) or auto (secret_ref when present, else shared).
+		Mode          string        `mapstructure:"mode"`
+		StaleMax      time.Duration `mapstructure:"stale_max"`      // serve an expired secret this long if the vault is down
+		RefreshAhead  float64       `mapstructure:"refresh_ahead"`  // fraction of cache_ttl after which the background sync refetches
+		SyncInterval  time.Duration `mapstructure:"sync_interval"`  // background sync period; 0 disables
+		MaxConcurrent int           `mapstructure:"max_concurrent"` // concurrent requests to the vault
+		AuthRetry     time.Duration `mapstructure:"auth_retry"`     // do not retry a BMC that rejected the same password within this window
+		SecretStore   string        `mapstructure:"secret_store"`   // protected (locked, encrypted memory; default) or plain
 	} `mapstructure:"cyberark"`
 
 	// Lab-only fallback when no CyberArk is reachable: credentials from env.
@@ -74,6 +84,13 @@ func LoadLocal(path string) (*Local, error) {
 	v.AutomaticEnv()
 
 	v.SetDefault("cyberark.cache_ttl", "1h")
+	v.SetDefault("cyberark.mode", "auto")
+	v.SetDefault("cyberark.stale_max", "6h")
+	v.SetDefault("cyberark.refresh_ahead", 0.8)
+	v.SetDefault("cyberark.sync_interval", "10m")
+	v.SetDefault("cyberark.max_concurrent", 8)
+	v.SetDefault("cyberark.auth_retry", "30m")
+	v.SetDefault("cyberark.secret_store", "protected")
 	v.SetDefault("local.buffer_dir", "/var/lib/bmcgrab/buffer")
 	v.SetDefault("local.config_cache", "/var/lib/bmcgrab/config.json")
 	v.SetDefault("local.max_buffer_mb", 2048)
@@ -116,6 +133,20 @@ func (c *Local) Validate(mode string) error {
 	}
 	if len(missing) > 0 {
 		return fmt.Errorf("missing required config: %s", strings.Join(missing, ", "))
+	}
+	if c.CyberArk.URL != "" {
+		switch c.CyberArk.Mode {
+		case "", "auto", "shared":
+			if c.CyberArk.Safe == "" || c.CyberArk.Object == "" {
+				return fmt.Errorf("cyberark.safe and cyberark.object are required in %q mode", c.CyberArk.Mode)
+			}
+		case "per_asset":
+		default:
+			return fmt.Errorf("cyberark.mode %q: expected shared, per_asset or auto", c.CyberArk.Mode)
+		}
+		if st := c.CyberArk.SecretStore; st != "" && st != "protected" && st != "plain" {
+			return fmt.Errorf("cyberark.secret_store %q: expected protected or plain", st)
+		}
 	}
 	return nil
 }

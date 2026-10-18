@@ -16,6 +16,10 @@ data:
       app_id: {{ $.Values.cyberark.app_id | quote }}
       safe: {{ $.Values.cyberark.safe | quote }}
       object: {{ $.Values.cyberark.object | quote }}
+      mode: {{ $.Values.cyberark.mode | default "auto" | quote }}
+      cache_ttl: {{ $.Values.cyberark.cache_ttl | default "1h" | quote }}
+      sync_interval: {{ $.Values.cyberark.sync_interval | default "10m" | quote }}
+      secret_store: {{ $.Values.cyberark.secret_store | default "protected" | quote }}
       client_cert: /etc/bmcgrab/tls/client.crt
       client_key: /etc/bmcgrab/tls/client.key
       ca_file: /etc/bmcgrab/tls/corp-ca.pem
@@ -50,6 +54,8 @@ data:
       app_id: {{ .Values.cyberark.app_id | quote }}
       safe: {{ .Values.cyberark.safe | quote }}
       object: {{ .Values.cyberark.object | quote }}
+      mode: {{ .Values.cyberark.mode | default "auto" | quote }}
+      secret_store: {{ .Values.cyberark.secret_store | default "protected" | quote }}
       client_cert: /etc/bmcgrab/tls/client.crt
       client_key: /etc/bmcgrab/tls/client.key
       ca_file: /etc/bmcgrab/tls/corp-ca.pem
