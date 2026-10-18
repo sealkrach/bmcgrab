@@ -135,8 +135,9 @@ func newSQL(dsn, password, query string) (Provider, error) {
 func (s *sqlProvider) Name() string { return "sql" }
 
 // List runs the configured query. The query must return columns in this order:
-// id, hostname, bmc_ip, region, vendor (vendor may be NULL). Region filtering
-// is done here so any inventory query works unchanged.
+// id, hostname, bmc_ip, region, vendor (vendor may be NULL) and optionally a
+// sixth column secret_ref (may be NULL). Region filtering is done here so any
+// inventory query works unchanged.
 func (s *sqlProvider) List(ctx context.Context, region string) ([]model.Server, error) {
 	rows, err := s.pool.Query(ctx, s.query)
 	if err != nil {
@@ -146,12 +147,19 @@ func (s *sqlProvider) List(ctx context.Context, region string) ([]model.Server, 
 	var out []model.Server
 	for rows.Next() {
 		var sv model.Server
-		var vendor *string
-		if err := rows.Scan(&sv.ID, &sv.Hostname, &sv.BMCAddr, &sv.Region, &vendor); err != nil {
+		var vendor, secretRef *string
+		dest := []any{&sv.ID, &sv.Hostname, &sv.BMCAddr, &sv.Region, &vendor}
+		if len(rows.FieldDescriptions()) > 5 {
+			dest = append(dest, &secretRef)
+		}
+		if err := rows.Scan(dest...); err != nil {
 			return nil, fmt.Errorf("inventory sql scan: %w", err)
 		}
 		if vendor != nil {
 			sv.Vendor = *vendor
+		}
+		if secretRef != nil {
+			sv.SecretRef = strings.TrimSpace(*secretRef)
 		}
 		if region == "" || sv.Region == region {
 			out = append(out, sv)
@@ -226,7 +234,7 @@ type csvProvider struct{ path string }
 
 func (c *csvProvider) Name() string { return "csv" }
 
-// List reads a CSV with a header line: id,hostname,bmc_ip,region[,vendor].
+// List reads a CSV with a header line: id,hostname,bmc_ip,region[,vendor][,secret_ref].
 func (c *csvProvider) List(_ context.Context, region string) ([]model.Server, error) {
 	f, err := os.Open(c.path)
 	if err != nil {
@@ -265,7 +273,7 @@ func (c *csvProvider) List(_ context.Context, region string) ([]model.Server, er
 		}
 		all = append(all, model.Server{
 			ID: get("id"), Hostname: get("hostname"), BMCAddr: get("bmc_ip"),
-			Region: get("region"), Vendor: get("vendor"),
+			Region: get("region"), Vendor: get("vendor"), SecretRef: get("secret_ref"),
 		})
 	}
 	return filterRegion(all, region), nil

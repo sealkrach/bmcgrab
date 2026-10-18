@@ -92,6 +92,9 @@ func New(ctx context.Context, o Options) (http.Handler, error) {
 		r.Post("/config/rollback/{version}", s.configRollback)
 		r.Get("/check", s.checkPage)
 		r.Post("/check/run", s.checkRun)
+		r.Get("/secrets", s.secretsPage)
+		r.Get("/secrets/runs", s.secretsRuns)
+		r.Post("/secrets/sync", s.secretsSync)
 		r.Get("/audit", s.audit)
 		// JSON API (same auth)
 		r.Get("/api/regions", s.apiRegions)
@@ -339,6 +342,71 @@ func (s *Server) checkRun(w http.ResponseWriter, r *http.Request) {
 	rep := s.o.CheckRunner(ctx)
 	_ = s.o.Store.Audit(r.Context(), user(r), "check.run", map[string]any{"failed": rep.Failed})
 	s.render(w, r, "check_result.html", page{Data: rep})
+}
+
+// ------------------------------------------------------------------ secrets
+
+type secretRunView struct {
+	timescale.SecretSyncRun
+	Summary string
+	Errors  []string
+}
+
+func (s *Server) secretRuns(ctx context.Context) ([]secretRunView, error) {
+	runs, err := s.o.Store.SecretSyncRuns(ctx, 50)
+	out := make([]secretRunView, 0, len(runs))
+	for _, u := range runs {
+		v := secretRunView{SecretSyncRun: u}
+		var rep struct {
+			Requested, Fetched, Changed, Skipped, Failed int
+			Errors                                       []struct{ Ref, Error string }
+		}
+		if json.Unmarshal(u.Report, &rep) == nil {
+			v.Summary = fmt.Sprintf("%d accounts · %d fetched · %d rotated · %d failed", rep.Requested, rep.Fetched, rep.Changed, rep.Failed)
+			for _, e := range rep.Errors {
+				v.Errors = append(v.Errors, e.Ref+": "+e.Error)
+			}
+		}
+		out = append(out, v)
+	}
+	return out, err
+}
+
+func (s *Server) secretsPage(w http.ResponseWriter, r *http.Request) {
+	runs, err := s.secretRuns(r.Context())
+	p := page{Title: "Secrets", Active: "secrets", Data: runs}
+	if err != nil {
+		p.Error = err.Error()
+	}
+	s.render(w, r, "secrets.html", p)
+}
+
+func (s *Server) secretsRuns(w http.ResponseWriter, r *http.Request) {
+	runs, err := s.secretRuns(r.Context())
+	p := page{Data: runs}
+	if err != nil {
+		p.Error = err.Error()
+	}
+	s.render(w, r, "secrets_runs.html", p)
+}
+
+// secretsSync queues a manual synchronisation. Collectors pick it up within a
+// few seconds; the page lists their results.
+func (s *Server) secretsSync(w http.ResponseWriter, r *http.Request) {
+	region := strings.TrimSpace(r.FormValue("region"))
+	serverID := strings.TrimSpace(r.FormValue("server_id"))
+	id, err := s.o.Store.RequestSecretSync(r.Context(), user(r), region, serverID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	_ = s.o.Store.Audit(r.Context(), user(r), "secrets.sync", map[string]any{"request": id, "region": region, "server_id": serverID})
+	runs, rerr := s.secretRuns(r.Context())
+	p := page{Data: runs, Flash: fmt.Sprintf("Sync #%d queued; collectors pick it up within seconds.", id)}
+	if rerr != nil {
+		p.Error = rerr.Error()
+	}
+	s.render(w, r, "secrets_runs.html", p)
 }
 
 func (s *Server) audit(w http.ResponseWriter, r *http.Request) {

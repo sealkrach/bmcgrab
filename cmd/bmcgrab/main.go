@@ -56,6 +56,7 @@ func main() {
 		&cobra.Command{Use: "server", Short: "Run the central web UI/API", RunE: runServer},
 		&cobra.Command{Use: "migrate", Short: "Apply database migrations", RunE: runMigrate},
 		chk,
+		secretsCmd(),
 	)
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
@@ -81,11 +82,38 @@ func openStore(ctx context.Context, cfg *config.Local, maxConns int32) (*timesca
 	return st, nil
 }
 
-func newVault(cfg *config.Local, log interface{ Warn(string, ...any) }) (vault.Provider, error) {
+func newVault(cfg *config.Local, log interface{ Warn(string, ...any) }, m *telemetry.Metrics) (vault.Provider, error) {
 	if cfg.CyberArk.URL != "" {
+		var hooks vault.Hooks
+		if m != nil {
+			hooks = vault.Hooks{
+				OnFetch: func(ok bool) {
+					if ok {
+						m.VaultFetch.WithLabelValues("ok").Inc()
+						return
+					}
+					m.VaultFetch.WithLabelValues("error").Inc()
+					m.VaultErrors.Inc()
+				},
+				OnStale: m.VaultStale.Inc,
+			}
+		}
+		var store vault.Store
+		if cfg.CyberArk.SecretStore != "plain" {
+			ps, err := vault.ProtectedStore()
+			if err != nil {
+				// Typically RLIMIT_MEMLOCK / missing IPC_LOCK. Run, but say so.
+				log.Warn("protected secret memory unavailable, using plain memory", "err", err.Error())
+			} else {
+				store = ps
+			}
+		}
 		return vault.NewCyberArk(vault.CyberArkConfig{
-			URL: cfg.CyberArk.URL, AppID: cfg.CyberArk.AppID, Safe: cfg.CyberArk.Safe, Object: cfg.CyberArk.Object,
-			ClientCert: cfg.CyberArk.ClientCert, ClientKey: cfg.CyberArk.ClientKey, CAFile: cfg.CyberArk.CAFile, CacheTTL: cfg.CyberArk.CacheTTL,
+			Store: store,
+			URL:   cfg.CyberArk.URL, AppID: cfg.CyberArk.AppID, Safe: cfg.CyberArk.Safe, Object: cfg.CyberArk.Object,
+			ClientCert: cfg.CyberArk.ClientCert, ClientKey: cfg.CyberArk.ClientKey, CAFile: cfg.CyberArk.CAFile,
+			Mode: vault.Mode(cfg.CyberArk.Mode), CacheTTL: cfg.CyberArk.CacheTTL, StaleMax: cfg.CyberArk.StaleMax,
+			RefreshAhead: cfg.CyberArk.RefreshAhead, MaxConcurrent: cfg.CyberArk.MaxConcurrent, Hooks: hooks,
 		})
 	}
 	if !flagLab {
@@ -118,7 +146,8 @@ func runCollector(_ *cobra.Command, _ []string) error {
 	if err != nil {
 		log.Warn("database unreachable at start; cycles will be buffered until it returns", "err", err)
 	}
-	vp, err := newVault(cfg, log)
+	metrics := telemetry.NewMetrics(cfg.Region)
+	vp, err := newVault(cfg, log, metrics)
 	if err != nil {
 		return err
 	}
@@ -126,9 +155,9 @@ func runCollector(_ *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	metrics := telemetry.NewMetrics(cfg.Region)
 	col := collector.New(collector.Options{
 		Local: cfg, Store: store, Vault: vp, Registry: vendors.All(), Buffer: buf, Metrics: metrics, Log: log, Version: version, Lab: flagLab,
+		AuthRetry: cfg.CyberArk.AuthRetry, SyncInterval: cfg.CyberArk.SyncInterval,
 	})
 	srv := telemetry.Serve(cfg.Metrics.Listen, col.Healthy)
 	defer srv.Close()
@@ -161,7 +190,7 @@ func runServer(_ *cobra.Command, _ []string) error {
 
 	// The server can run the pre-flight too when it has a credential source.
 	var runner func(context.Context) *check.Report
-	if vp, err := newVault(cfg, log); err == nil {
+	if vp, err := newVault(cfg, log, nil); err == nil {
 		runner = func(ctx context.Context) *check.Report {
 			return check.Run(ctx, check.Options{Local: cfg, Store: store, Vault: vp, Registry: vendors.All(), Lab: flagLab, Sample: 10})
 		}
@@ -223,7 +252,7 @@ func runCheck(_ *cobra.Command, sample int) error {
 	if store != nil {
 		defer store.Close()
 	}
-	vp, err := newVault(cfg, log)
+	vp, err := newVault(cfg, log, nil)
 	if err != nil {
 		return err
 	}

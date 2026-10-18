@@ -11,6 +11,7 @@
     <a href="/servers" class="{{if eq .Active "servers"}}on{{end}}">Servers</a>
     <a href="/config" class="{{if eq .Active "config"}}on{{end}}">Configuration</a>
     <a href="/check" class="{{if eq .Active "check"}}on{{end}}">Check</a>
+    <a href="/secrets" class="{{if eq .Active "secrets"}}on{{end}}">Secrets</a>
     <a href="/audit" class="{{if eq .Active "audit"}}on{{end}}">Audit</a>
   </nav>
   <div class="user">{{.User}}{{if .Auth}} <form method="post" action="/auth/logout" class="inline"><button class="link">sign out</button></form>{{else}} <span class="warn-badge" title="No OIDC issuer configured">no auth</span>{{end}}</div>
